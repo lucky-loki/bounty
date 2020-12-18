@@ -16,12 +16,12 @@ var (
 )
 
 const (
+	closed = iota
+	running
+
 	defaultWorkerPoolSize       = 10000
 	defaultWorkerExpiryInterval = 5 * time.Minute
 	defaultWorkerQueueSize      = 100
-
-	closed = iota
-	running
 )
 
 // WorkerPool can get a worker from pool

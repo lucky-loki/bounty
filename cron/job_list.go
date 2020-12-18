@@ -3,6 +3,7 @@ package cron
 import (
 	"container/heap"
 	"errors"
+	"github.com/lucky-loki/bounty"
 	"sync"
 	"time"
 )
@@ -62,6 +63,17 @@ func (m *MemeJobList) QueryExpireSoonest() (*Entry, error) {
 	}
 	eCopy := *e
 	return &eCopy, nil
+}
+
+func (m *MemeJobList) Query(name string) (bounty.Job, error)  {
+	m.Lock()
+	defer m.Unlock()
+
+	e, ok := m.jobMap[name]
+	if !ok {
+		return nil, errJobNotFound
+	}
+	return e.Schedule, nil
 }
 
 func (m *MemeJobList) Update(name string, now time.Time) error {

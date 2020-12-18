@@ -34,6 +34,7 @@ type Schedule interface {
 type JobList interface {
 	Add(name string, schedule Schedule) error
 	QueryExpireSoonest() (*Entry, error)
+	Query(name string) (bounty.Job, error)
 	Update(name string, now time.Time) error
 	Remove(name string) (*Entry, error)
 	Reset() error
@@ -100,6 +101,18 @@ func (c *Cron) PublishIntervalFunc(name string, interval time.Duration, f func()
 func (c *Cron) PublishIntervalJob(name string, interval time.Duration, job bounty.Job) error {
 	s := Every(interval, job)
 	return c.Publish(name, s)
+}
+
+// Exec job by manual and sync method
+func (c *Cron) Exec(name string) error {
+	defer bounty.WithRecover()
+
+	job, err := c.jobList.Query(name)
+	if err != nil {
+		return err
+	}
+	job.Run()
+	return nil
 }
 
 // RemoveJob remove job from cron by jobId

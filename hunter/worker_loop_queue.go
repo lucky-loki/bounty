@@ -38,6 +38,7 @@ func NewWorkerLoopQueue(option WorkerPoolOption) WorkerPool {
 		size:                 option.PoolSize,
 		workerExpiryInterval: option.WorkerExpiryInterval,
 		lastGetAt:            time.Now(),
+		status:               closed,
 	}
 
 	loopQueue.workerCache.New = func() interface{} {
@@ -169,6 +170,8 @@ func (wq *workerLoopQueue) purge() {
 			if err != nil {
 				defaultLogger.Printf("[WorkerLoopQueue] [Run] purge error: %s\n", err)
 			}
+			// put back sync.Pool
+			wq.workerCache.Put(w)
 			// from tail search an active worker, then swap
 			for end = end - 1; i < end; end-- {
 				wt := wq.workerList[end]
@@ -177,6 +180,7 @@ func (wq *workerLoopQueue) purge() {
 					if err != nil {
 						defaultLogger.Printf("[WorkerLoopQueue] [Run] purge error: %s\n", err)
 					}
+					wq.workerCache.Put(wt)
 					wq.workerList[end] = nil
 					continue
 				}
