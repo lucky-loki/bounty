@@ -49,7 +49,7 @@ func TestCron_Publish_Schedule(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob := Default("myCronJob", execLibrary, db_)
 	cronJob.Run()
 	err = cronJob.Publish(&SpecJob{
 		JobName: "print_1",
@@ -70,7 +70,7 @@ func TestCron_Publish_OneTime(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob := Default("myCronJob", execLibrary, db_)
 	cronJob.Run()
 	err = cronJob.Publish(&SpecJob{
 		JobName: "print_one_time",
@@ -93,7 +93,7 @@ func TestCron_Load(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob := Default("myCronJob", execLibrary, db_)
 	err = cronJob.Load()
 	cronJob.Run()
 	if err != nil {
@@ -109,7 +109,7 @@ func TestCron_Load_OneTime(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob := Default("myCronJob", execLibrary, db_)
 	cronJob.Run()
 	err = cronJob.Publish(&SpecJob{
 		JobName: "print_one_time",
@@ -126,7 +126,7 @@ func TestCron_Load_OneTime(t *testing.T) {
 	cronJob.Stop()
 
 	// mock reboot then load and
-	cronJob2 := NewCron("myCronJob", execLibrary, db_)
+	cronJob2 := Default("myCronJob", execLibrary, db_)
 	err = cronJob2.Load()
 	if err != nil {
 		t.Error(err)

@@ -23,7 +23,7 @@ type Cron struct {
 
 	consumer bounty.Consumer
 	execLibrary ExecutableLibrary
-	jobList  JobList
+	jobList  *JobList
 
 	running int64
 	newJob  chan struct{} // notify blocked schedule routine
@@ -34,6 +34,18 @@ type ExecutableLibrary interface {
 	Get(path string) (bounty.Executable, error)
 }
 
+type SpecJob struct {
+	CronName       string		`gorm:"unique_index:uuid"`
+	JobName        string		`gorm:"unique_index:uuid"`
+	ExecutablePath string
+	Argv           []byte
+	Spec           string
+	OneTime        bool	// just run job one time, then will remove the job
+	Prev           int64
+	Next           int64
+	Schedule       Schedule `gorm:"-"`
+}
+
 // Entry the schedule unit
 type Entry struct {
 	Schedule Schedule
@@ -41,14 +53,14 @@ type Entry struct {
 	Index    int
 	Prev     time.Time
 	Next     time.Time
-	OneTime bool
+	OneTime  bool
 }
 
-// NewCron return a inited cron instance
-func NewCron(cronName string, execLibrary ExecutableLibrary, db *gorm.DB) *Cron {
+// NewCron return a cron instance with memeJobList + mysql persistence layer
+func Default(cronName string, execLibrary ExecutableLibrary, db *gorm.DB) *Cron {
 	c := &Cron{
 		consumer: hunter.NewHunter(hunter.WorkerPoolOption{}),
-		jobList:  newMysqlJobList(cronName, db, execLibrary),
+		jobList:  newJobList(cronName, execLibrary, newMysqlPersistence(db)),
 		running:  stopped,
 		newJob:   make(chan struct{}, 1),
 		stop:     make(chan struct{}, 1),
@@ -56,7 +68,18 @@ func NewCron(cronName string, execLibrary ExecutableLibrary, db *gorm.DB) *Cron 
 	return c
 }
 
-// Load restore job list from local filesystem
+func NewCron(cronName string, execLibrary ExecutableLibrary, persistence JobListPersistence) *Cron {
+	c := &Cron{
+		consumer: hunter.NewHunter(hunter.WorkerPoolOption{}),
+		jobList:  newJobList(cronName, execLibrary, persistence),
+		running:  stopped,
+		newJob:   make(chan struct{}, 1),
+		stop:     make(chan struct{}, 1),
+	}
+	return c
+}
+
+// Load query from persistence and load into memeJobList
 func (c *Cron) Load() error {
 	return c.jobList.Load()
 }
