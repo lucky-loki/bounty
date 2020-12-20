@@ -24,6 +24,10 @@ type Job interface {
 	Run()
 }
 
+type Executable interface {
+	Run(v []byte)
+}
+
 // FuncJob warpper a func() into a Job
 type FuncJob func()
 

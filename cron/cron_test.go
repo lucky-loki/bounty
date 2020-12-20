@@ -1,61 +1,138 @@
 package cron
 
 import (
+	"errors"
 	"fmt"
+	"github.com/jinzhu/gorm"
 	"testing"
 	"time"
 
 	"github.com/lucky-loki/bounty"
-	"github.com/lucky-loki/bounty/hunter"
+	"github.com/lucky-loki/orm"
 )
 
-func printJob(format string, a ...interface{}) bounty.FuncJob {
-	return func() {
-		fmt.Printf(format, a...)
-	}
+type printExec struct {}
+
+func (p *printExec) Run(v []byte) {
+	fmt.Println(string(v))
 }
 
-func TestNewCron(t *testing.T) {
-	cronJob := NewCron(NewMemeJobList(100), hunter.NewHunter(hunter.WorkerPoolOption{PoolSize: 100}))
-	cronJob.Run()
-	err := cronJob.PublishIntervalJob("just print", 2*time.Second, printJob("1\n"))
-	if err != nil {
-		t.Logf("publish job error: %s", err)
-		return
+
+type execMapLibrary map[string]bounty.Executable
+
+func (el execMapLibrary) Get(path string) (bounty.Executable, error) {
+	e, ok := el[path]
+	if !ok {
+		return nil, errors.New("not found")
 	}
-	time.Sleep(20 * time.Second)
+	return e, nil
 }
 
-func TestCron_ExecAt(t *testing.T) {
-	cronJob := NewCron(NewMemeJobList(100), hunter.NewHunter(hunter.WorkerPoolOption{PoolSize: 100}))
-	cronJob.Run()
-	past := time.Now().Add(-time.Minute)
-	err := cronJob.ExecAt("run in the past", past, printJob("run in the past\n"))
-	if err != nil {
-		t.Logf("run job in the past error: %s", err)
-		return
-	}
-	future := time.Now().Add(30 * time.Second)
-	err = cronJob.ExecAt("run in the future", future, printJob("run in the future\n"))
-	if err != nil {
-		t.Logf("run job in the past error: %s", err)
-		return
-	}
-	time.Sleep(3 * time.Minute)
+var execLibrary = execMapLibrary{
+	"/print": new(printExec),
 }
 
-func TestNewSpecSchedule(t *testing.T) {
-	cronJob := NewCron(NewMemeJobList(100), hunter.NewHunter(hunter.WorkerPoolOption{PoolSize: 100}))
-	cronJob.Run()
-	specSche, err := NewSpecSchedule("1-59 * * * * *", printJob("1\n"))
+func connect() (*gorm.DB, error) {
+	c := db.Config{
+		Host: "localhost",
+		Port: 3306,
+		User: "root",
+		Password: "sun1990",
+		Database: "god",
+	}
+	return c.OpenMysql()
+}
+
+func TestCron_Publish_Schedule(t *testing.T) {
+	db_, err := connect()
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	err = cronJob.Publish("just print", specSche)
+	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob.Run()
+	err = cronJob.Publish(&SpecJob{
+		JobName: "print_1",
+		ExecutablePath: "/print",
+		Argv: []byte("1"),
+		Spec: "1-59 * * * * *",
+	})
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	time.Sleep(15*time.Second)
+	time.Sleep(1*time.Minute)
+}
+
+func TestCron_Publish_OneTime(t *testing.T) {
+	db_, err := connect()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob.Run()
+	err = cronJob.Publish(&SpecJob{
+		JobName: "print_one_time",
+		ExecutablePath: "/print",
+		Argv: []byte("1"),
+		OneTime: true,
+		Next: time.Now().Add(10*time.Second).Unix(),
+	})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	time.Sleep(1*time.Minute)
+}
+
+
+func TestCron_Load(t *testing.T) {
+	db_, err := connect()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	cronJob := NewCron("myCronJob", execLibrary, db_)
+	err = cronJob.Load()
+	cronJob.Run()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	time.Sleep(1*time.Minute)
+}
+
+func TestCron_Load_OneTime(t *testing.T) {
+	db_, err := connect()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	cronJob := NewCron("myCronJob", execLibrary, db_)
+	cronJob.Run()
+	err = cronJob.Publish(&SpecJob{
+		JobName: "print_one_time",
+		ExecutablePath: "/print",
+		Argv: []byte("1"),
+		OneTime: true,
+		Next: time.Now().Add(1*time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	// mock crash
+	cronJob.Stop()
+
+	// mock reboot then load and
+	cronJob2 := NewCron("myCronJob", execLibrary, db_)
+	err = cronJob2.Load()
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	cronJob2.Run()
+	time.Sleep(2*time.Minute)
+
 }

@@ -2,6 +2,8 @@ package cron
 
 import (
 	"errors"
+	"github.com/jinzhu/gorm"
+	"github.com/lucky-loki/bounty/hunter"
 	"sync/atomic"
 	"time"
 
@@ -17,7 +19,10 @@ const (
 // specified by the schedule. It may be started, stopped, and the entries can
 // be removed while running.
 type Cron struct {
+	Name string
+
 	consumer bounty.Consumer
+	execLibrary ExecutableLibrary
 	jobList  JobList
 
 	running int64
@@ -25,22 +30,9 @@ type Cron struct {
 	stop    chan struct{} // stop schedule routine
 }
 
-// The Schedule describe a cycle job
-type Schedule interface {
-	Next(time.Time) time.Time
-	bounty.Job
+type ExecutableLibrary interface {
+	Get(path string) (bounty.Executable, error)
 }
-
-type JobList interface {
-	Add(name string, schedule Schedule) error
-	QueryExpireSoonest() (*Entry, error)
-	Query(name string) (bounty.Job, error)
-	Update(name string, now time.Time) error
-	Remove(name string) (*Entry, error)
-	Reset() error
-}
-
-var _ JobList = &MemeJobList{}
 
 // Entry the schedule unit
 type Entry struct {
@@ -49,13 +41,14 @@ type Entry struct {
 	Index    int
 	Prev     time.Time
 	Next     time.Time
+	OneTime bool
 }
 
 // NewCron return a inited cron instance
-func NewCron(jobList JobList, consumer bounty.Consumer) *Cron {
+func NewCron(cronName string, execLibrary ExecutableLibrary, db *gorm.DB) *Cron {
 	c := &Cron{
-		consumer: consumer,
-		jobList:  jobList,
+		consumer: hunter.NewHunter(hunter.WorkerPoolOption{}),
+		jobList:  newMysqlJobList(cronName, db, execLibrary),
 		running:  stopped,
 		newJob:   make(chan struct{}, 1),
 		stop:     make(chan struct{}, 1),
@@ -63,25 +56,20 @@ func NewCron(jobList JobList, consumer bounty.Consumer) *Cron {
 	return c
 }
 
-// ExecAt run a job in future then remove it
-func (c *Cron) ExecAt(name string, future time.Time, s bounty.Job) error {
-	delta := future.Sub(time.Now())
-	runThenRemove := func() {
-		s.Run()
-		_, _ = c.RemoveJob(name)
-	}
-	return c.PublishIntervalFunc(name, delta, runThenRemove)
+// Load restore job list from local filesystem
+func (c *Cron) Load() error {
+	return c.jobList.Load()
 }
 
 // Publish a new Schedule job
-func (c *Cron) Publish(name string, s Schedule) error {
-	if s == nil {
-		return errors.New("schedule can not be nil")
+func (c *Cron) Publish(specJob *SpecJob) error {
+	if specJob == nil {
+		return errors.New("specJob can not be nil")
 	}
-	defaultLogger.Printf("[Publish] add new job (%s)\n", name)
-	err := c.jobList.Add(name, s)
+	defaultLogger.Printf("[Publish] add new job (%s)\n", specJob.JobName)
+	err := c.jobList.Add(specJob)
 	if err != nil {
-		defaultLogger.Printf("[Publish] new job (%s) add to cron job error: %s\n", name, err)
+		defaultLogger.Printf("[Publish] new job (%s) add to cron job error: %s\n", specJob.JobName, err)
 		return err
 	}
 
@@ -92,18 +80,7 @@ func (c *Cron) Publish(name string, s Schedule) error {
 	return nil
 }
 
-// PublishIntervalFunc publish a func cycle executed with interval
-func (c *Cron) PublishIntervalFunc(name string, interval time.Duration, f func()) error {
-	return c.PublishIntervalJob(name, interval, bounty.FuncJob(f))
-}
-
-// PublishIntervalJob publish a job cycle executed with interval
-func (c *Cron) PublishIntervalJob(name string, interval time.Duration, job bounty.Job) error {
-	s := Every(interval, job)
-	return c.Publish(name, s)
-}
-
-// Exec job by manual and sync method
+// Exec job by manual and sync method, this will not update job next exec time
 func (c *Cron) Exec(name string) error {
 	defer bounty.WithRecover()
 
@@ -123,10 +100,6 @@ func (c *Cron) RemoveJob(name string) (*Entry, error) {
 		defaultLogger.Printf("[RemoveJob] job (%s) remove error: %s\n", name, err)
 	}
 	return e, err
-}
-
-func (c *Cron) ClearJobList() error {
-	return c.jobList.Reset()
 }
 
 // Run loop query latest expire job and push it to consumer.
@@ -204,12 +177,20 @@ func (c *Cron) consume(e *Entry, now time.Time) {
 	defer bounty.WithRecover()
 	defer c.update(e, now)
 
+	job := func() {
+		e.Schedule.Run()
+		if e.OneTime {
+			_, _ = c.RemoveJob(e.Name)
+		}
+	}
+
+	// run schedule job
 	defaultLogger.Printf("[Run] job (%s) consumed prev: %s\n", e.Name, e.Prev)
-	err := c.consumer.Consume(e.Schedule)
+	err := c.consumer.Consume(bounty.FuncJob(job))
 	if err != nil {
 		defaultLogger.Printf("[Run] job (%s) consumed error: %s\n", e.Name, err)
-		// run schedule by sync method
 		defaultLogger.Printf("[Run] job (%s) run by sync method\n", e.Name)
-		e.Schedule.Run()
+		// run schedule by sync method
+		job()
 	}
 }
