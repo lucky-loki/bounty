@@ -34,19 +34,19 @@ func newMemeJobList(size int) *memeJobList {
 	return m
 }
 
-func (m *memeJobList) Add(name string, s Schedule, oneTime bool, next time.Time) error {
+func (m *memeJobList) Add(job *SpecJob) error {
 	m.Lock()
 	defer m.Unlock()
 
 	if len(m.jobList) >= m.maxSize {
 		return errCronJobListFull
 	}
-	_, ok := m.jobMap[name]
+	_, ok := m.jobMap[job.JobName]
 	if ok {
 		return errJobAlreadyExist
 	}
 
-	e := &Entry{Schedule: s, Name: name, Next: next, OneTime: oneTime}
+	e := &Entry{Schedule: job.Schedule, Name: job.JobName, Next: time.Unix(job.Next, 0), OneTime: job.OneTime}
 	heap.Push(&m.jobList, e)
 	m.jobMap[e.Name] = e
 
@@ -75,7 +75,7 @@ func (m *memeJobList) Query(name string) (Schedule, error)  {
 	return e.Schedule, nil
 }
 
-func (m *memeJobList) Update(name string, now time.Time) error {
+func (m *memeJobList) Update(name string, prev, next int64) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -83,8 +83,8 @@ func (m *memeJobList) Update(name string, now time.Time) error {
 	if !ok {
 		return errJobNotFound
 	}
-	e.Prev = now
-	e.Next = e.Schedule.Next(now)
+	e.Prev = time.Unix(prev, 0)
+	e.Next = time.Unix(next, 0)
 	heap.Fix(&m.jobList, e.Index)
 
 	return nil
